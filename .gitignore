@@ -1,0 +1,17 @@
+# Credenciais - NUNCA subir isso pro GitHub
+.env
+
+# Arquivos gerados pelo agente (estado local, não faz sentido versionar)
+seen_jobs.json
+agent.log
+cron.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# VS Code
+tempCodeRunnerFile.py
+.vscode/
