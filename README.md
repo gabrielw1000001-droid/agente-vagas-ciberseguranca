@@ -26,15 +26,17 @@ Copie `.env.example` para `.env`:
 cp .env.example .env
 ```
 
-### 2.1 Chave da JSearch API (gratuita)
+### 2.1 Chave da JSearch API (gratuita, via OpenWeb Ninja — endpoint direto)
 
-1. Crie uma conta em https://rapidapi.com
-2. Acesse https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
-3. Clique em **Subscribe** e escolha o plano **Basic (gratuito)** — dá direito
-   a um número limitado de buscas por mês, suficiente para rodar o agente
-   algumas vezes ao dia.
-4. Copie sua **X-RapidAPI-Key** (aparece na aba "Endpoints" à direita) e
-   cole no `.env` em `RAPIDAPI_KEY`.
+1. Crie uma conta em https://app.openwebninja.com/signup (não precisa de cartão)
+2. Acesse https://www.openwebninja.com/api/jsearch e assine o plano **Free**
+   (200 requisições/mês, suficiente para rodar o agente uma vez por dia)
+3. Copie sua **API Key** no painel (app.openwebninja.com) e cole no `.env`
+   em `OPENWEBNINJA_API_KEY`.
+
+> 💡 Essa é a mesma API JSearch, só que acessada direto pelo site da OpenWeb
+> Ninja (empresa por trás dela), sem passar pelo marketplace da RapidAPI —
+> evita problemas de assinatura/plano não renovar automaticamente.
 
 ### 2.2 WhatsApp via CallMeBot (gratuito)
 
@@ -115,7 +117,7 @@ Adicione uma linha para rodar a cada 6 horas, por exemplo:
 
 ## 6. Limitações e próximos passos possíveis
 
-- **Plano gratuito do RapidAPI** tem limite mensal de requisições — se
+- **Plano gratuito da OpenWeb Ninja** tem limite de 200 requisições por mês — se
   esgotar, o agente vai logar erro até o mês virar (ou você pode fazer
   upgrade do plano).
 - **CallMeBot** é pessoal e informal, não é o WhatsApp Business oficial da

@@ -5,6 +5,7 @@
 seen_jobs.json
 agent.log
 cron.log
+last_run.json
 
 # Python
 __pycache__/

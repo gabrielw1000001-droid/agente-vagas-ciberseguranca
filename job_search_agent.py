@@ -3,8 +3,9 @@
 Agente de Busca de Emprego para Cibersegurança
 ================================================
 Busca vagas de cibersegurança no Brasil (remoto + presencial) usando a
-JSearch API (que agrega LinkedIn, Indeed, Glassdoor, Google Jobs, etc.)
-e envia alertas de vagas novas via WhatsApp (CallMeBot).
+JSearch API (via OpenWeb Ninja, endpoint direto — agrega LinkedIn, Indeed,
+Glassdoor, Google Jobs, etc.) e envia alertas de vagas novas via Telegram
+(CallMeBot).
 
 Uso:
     python job_search_agent.py
@@ -30,11 +31,10 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
-RAPIDAPI_HOST = "jsearch.p.rapidapi.com"
+OPENWEBNINJA_API_KEY = os.getenv("OPENWEBNINJA_API_KEY", "")
 
-WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE", "")
-CALLMEBOT_APIKEY = os.getenv("CALLMEBOT_APIKEY", "")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 SEARCH_KEYWORDS = [
     k.strip() for k in os.getenv("SEARCH_KEYWORDS", "cibersegurança").split(",") if k.strip()
@@ -44,14 +44,7 @@ DATE_POSTED = os.getenv("DATE_POSTED", "week")
 MAX_JOBS_PER_RUN = int(os.getenv("MAX_JOBS_PER_RUN", "8"))
 FILTER_SAO_PAULO = os.getenv("FILTER_SAO_PAULO", "true").strip().lower() in ("1", "true", "yes", "sim")
 
-# Intervalo mínimo entre execuções, para não estourar a cota mensal da API caso
-# o agendador (cron/Agendador de Tarefas) dispare o script com mais frequência
-# do que o pretendido. Com 4 keywords e 1 execução/dia isso consome ~120
-# requisições/mês, dentro da cota gratuita da maioria dos planos BASIC.
-MIN_HOURS_BETWEEN_RUNS = float(os.getenv("MIN_HOURS_BETWEEN_RUNS", "20"))
-
 SEEN_JOBS_FILE = BASE_DIR / "seen_jobs.json"
-LAST_RUN_FILE = BASE_DIR / "last_run.json"
 LOG_FILE = BASE_DIR / "agent.log"
 
 logging.basicConfig(
@@ -82,67 +75,30 @@ def save_seen_jobs(seen_ids: set) -> None:
 
 
 # --------------------------------------------------------------------------
-# Controle de frequência de execução (protege a cota mensal da API)
-# --------------------------------------------------------------------------
-
-def should_skip_due_to_frequency() -> bool:
-    """Impede que o agente rode com mais frequência do que MIN_HOURS_BETWEEN_RUNS,
-    mesmo que o agendador dispare o script várias vezes. Isso evita estourar a
-    cota mensal gratuita da JSearch API por engano."""
-    if not LAST_RUN_FILE.exists():
-        return False
-    try:
-        with open(LAST_RUN_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        last_run = datetime.fromisoformat(data["last_run"])
-    except (json.JSONDecodeError, OSError, KeyError, ValueError):
-        return False
-
-    hours_since = (datetime.now() - last_run).total_seconds() / 3600
-    if hours_since < MIN_HOURS_BETWEEN_RUNS:
-        log.info(
-            f"Última execução foi há {hours_since:.1f}h (mínimo configurado: "
-            f"{MIN_HOURS_BETWEEN_RUNS}h). Pulando para economizar cota da API."
-        )
-        return True
-    return False
-
-
-def mark_run_timestamp() -> None:
-    with open(LAST_RUN_FILE, "w", encoding="utf-8") as f:
-        json.dump({"last_run": datetime.now().isoformat()}, f)
-
-
-# --------------------------------------------------------------------------
 # Busca de vagas (JSearch API)
 # --------------------------------------------------------------------------
 
-class QuotaExceededError(Exception):
-    """Levantado quando a JSearch API retorna 429 por cota mensal excedida.
-    Usado para interromper o restante das buscas imediatamente, em vez de
-    continuar tentando (o que não gasta cota, mas não faz sentido insistir)."""
-    pass
-
-
 def search_jobs(keyword: str, max_retries: int = 3) -> list:
-    """Busca vagas para uma palavra-chave usando a JSearch API.
-    Tenta novamente automaticamente em caso de erro de conexão/rede."""
-    if not RAPIDAPI_KEY or RAPIDAPI_KEY == "coloque_sua_chave_aqui":
+    """Busca vagas para uma palavra-chave usando a JSearch API (via OpenWeb Ninja,
+    endpoint direto — sem passar pelo RapidAPI). Tenta novamente automaticamente
+    em caso de erro de conexão/rede."""
+    if not OPENWEBNINJA_API_KEY or OPENWEBNINJA_API_KEY == "coloque_sua_chave_aqui":
         raise RuntimeError(
-            "RAPIDAPI_KEY não configurada. Edite o arquivo .env com sua chave do RapidAPI."
+            "OPENWEBNINJA_API_KEY não configurada. Edite o arquivo .env com sua chave "
+            "do OpenWeb Ninja (app.openwebninja.com)."
         )
 
-    url = "https://jsearch.p.rapidapi.com/search-v2"
+    url = "https://api.openwebninja.com/jsearch/search-v2"
     query = f"{keyword} no Brasil"
     params = {
         "query": query,
         "num_pages": "1",
         "date_posted": DATE_POSTED,
         "country": SEARCH_COUNTRY,
+        "language": "pt",
     }
     headers = {
-        "X-RapidAPI-Key": RAPIDAPI_KEY,
-        "X-RapidAPI-Host": RAPIDAPI_HOST,
+        "x-api-key": OPENWEBNINJA_API_KEY,
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -153,15 +109,6 @@ def search_jobs(keyword: str, max_retries: int = 3) -> list:
     for attempt in range(1, max_retries + 1):
         try:
             resp = requests.get(url, headers=headers, params=params, timeout=20)
-            if resp.status_code == 429 and "monthly quota" in resp.text.lower():
-                # Cota mensal do plano estourou. Não adianta tentar de novo nem
-                # continuar com as próximas keywords nesta execução.
-                log.error(
-                    f"Cota mensal da JSearch API excedida ao buscar '{keyword}'. "
-                    f"Interrompendo buscas até o próximo ciclo de faturamento do RapidAPI "
-                    f"(ou upgrade de plano em rapidapi.com)."
-                )
-                raise QuotaExceededError(resp.text[:300])
             if resp.status_code != 200:
                 # Loga o corpo da resposta de erro para diagnóstico (RapidAPI costuma
                 # devolver uma mensagem explicando o motivo, ex: "not subscribed")
@@ -239,20 +186,11 @@ def is_probably_real_job(job: dict) -> bool:
 
 
 def collect_all_jobs() -> list:
-    """Roda a busca para todas as palavras-chave configuradas e deduplica por chave estável.
-    Para imediatamente se a cota mensal da API estourar, em vez de continuar
-    tentando as keywords restantes."""
+    """Roda a busca para todas as palavras-chave configuradas e deduplica por chave estável."""
     all_jobs = {}
     for kw in SEARCH_KEYWORDS:
         log.info(f"Buscando vagas para: '{kw}'")
-        try:
-            jobs_raw = search_jobs(kw)
-        except QuotaExceededError:
-            log.warning(
-                f"Interrompendo busca das keywords restantes "
-                f"({SEARCH_KEYWORDS.index(kw) + 1}/{len(SEARCH_KEYWORDS)} tentada(s))."
-            )
-            raise
+        jobs_raw = search_jobs(kw)
         log.info(f"  -> {len(jobs_raw)} resultado(s)")
         jobs = [j for j in jobs_raw if is_probably_real_job(j)]
         removed = len(jobs_raw) - len(jobs)
@@ -289,7 +227,7 @@ def filter_by_location(jobs: list) -> list:
 
 
 # --------------------------------------------------------------------------
-# Formatação e envio de notificações (WhatsApp via CallMeBot)
+# Formatação e envio de notificações (Telegram)
 # --------------------------------------------------------------------------
 
 def format_job_message(job: dict) -> str:
@@ -302,26 +240,36 @@ def format_job_message(job: dict) -> str:
     link = job.get("job_apply_link", "")
 
     return (
-        f"🛡️ *{title}*\n"
+        f"🛡️ {title}\n"
         f"🏢 {company}\n"
         f"📍 {location}\n"
         f"🔗 {link}"
     )
 
 
-def send_whatsapp(text: str) -> bool:
-    if not WHATSAPP_PHONE or not CALLMEBOT_APIKEY:
-        log.warning("WHATSAPP_PHONE ou CALLMEBOT_APIKEY não configurados. Pulando envio.")
+def send_notification(text: str) -> bool:
+    """Envia a notificação via Telegram Bot API."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        log.warning("TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não configurados. Pulando envio.")
         return False
 
-    url = "https://api.callmebot.com/whatsapp.php"
-    params = {"phone": WHATSAPP_PHONE, "text": text, "apikey": CALLMEBOT_APIKEY}
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        # Sem parse_mode: títulos/empresas vêm de fontes externas e podem conter
+        # caracteres como * ou _ que quebrariam o parser de Markdown do Telegram
+        # (ex: "entity starting at byte offset X" quando o par não fecha).
+        "disable_web_page_preview": False,
+    }
     try:
-        resp = requests.get(url, params=params, timeout=20)
-        resp.raise_for_status()
+        resp = requests.post(url, json=payload, timeout=20)
+        if resp.status_code != 200:
+            log.error(f"Erro ao enviar Telegram: HTTP {resp.status_code} - {resp.text[:300]}")
+            return False
         return True
     except requests.exceptions.RequestException as e:
-        log.error(f"Erro ao enviar WhatsApp: {e}")
+        log.error(f"Erro ao enviar Telegram: {e}")
         return False
 
 
@@ -337,7 +285,7 @@ def wait_for_internet(max_wait_minutes: int = 5, check_interval_seconds: int = 1
     while time.time() < deadline:
         attempt += 1
         try:
-            requests.get("https://jsearch.p.rapidapi.com", timeout=5)
+            requests.get("https://api.openwebninja.com", timeout=5)
             if attempt > 1:
                 log.info("Conexão com a internet OK.")
             return True
@@ -354,27 +302,12 @@ def wait_for_internet(max_wait_minutes: int = 5, check_interval_seconds: int = 1
 def run():
     log.info("=== Iniciando execução do Agente de Busca de Emprego ===")
 
-    if should_skip_due_to_frequency():
-        return
-
     if not wait_for_internet():
         return
 
     seen_ids = load_seen_jobs()
 
-    try:
-        all_jobs = collect_all_jobs()
-    except QuotaExceededError:
-        # Avisa uma única vez por execução (não fica em silêncio, mas também
-        # não spamma o WhatsApp) e encerra sem marcar vagas como vistas.
-        send_whatsapp(
-            "⚠️ Cota mensal da JSearch API (RapidAPI) esgotada. "
-            "As buscas de vaga vão ficar paradas até o próximo ciclo de faturamento "
-            "ou até você fazer upgrade do plano em rapidapi.com."
-        )
-        mark_run_timestamp()
-        return
-
+    all_jobs = collect_all_jobs()
     all_jobs = filter_by_location(all_jobs)
     new_jobs = [j for j in all_jobs if stable_job_key(j) not in seen_ids]
 
@@ -382,23 +315,22 @@ def run():
 
     if not new_jobs:
         log.info("Nenhuma vaga nova. Encerrando.")
-        mark_run_timestamp()
         return
 
-    # Limita quantidade por execução para não spammar o WhatsApp
+    # Limita quantidade por execução para não spammar o Telegram
     jobs_to_notify = new_jobs[:MAX_JOBS_PER_RUN]
 
     header = (
-        f"🔔 *{len(new_jobs)} nova(s) vaga(s) de cibersegurança encontradas!*\n"
+        f"🔔 {len(new_jobs)} nova(s) vaga(s) de cibersegurança encontradas!\n"
         f"({datetime.now().strftime('%d/%m/%Y %H:%M')})\n"
     )
-    send_whatsapp(header)
+    send_notification(header)
     time.sleep(2)
 
     successfully_notified_ids = set()
     for job in jobs_to_notify:
         msg = format_job_message(job)
-        sent = send_whatsapp(msg)
+        sent = send_notification(msg)
         log.info(f"Notificação {'enviada' if sent else 'FALHOU'}: {job.get('job_title')}")
         if sent:
             successfully_notified_ids.add(stable_job_key(job))
@@ -406,7 +338,7 @@ def run():
 
     if len(new_jobs) > MAX_JOBS_PER_RUN:
         extra = len(new_jobs) - MAX_JOBS_PER_RUN
-        send_whatsapp(f"➕ Há mais {extra} vaga(s) nova(s). Rode o log completo para ver todas.")
+        send_notification(f"➕ Há mais {extra} vaga(s) nova(s). Rode o log completo para ver todas.")
 
     # Vagas fora da janela de notificação (acima do limite) também contam como "vistas",
     # para não acumular um backlog gigante. Só as que FALHARAM no envio ficam de fora,
@@ -423,7 +355,6 @@ def run():
     if failed_count:
         log.info(f"{failed_count} vaga(s) falharam no envio e serão re-tentadas na próxima execução.")
 
-    mark_run_timestamp()
     log.info("=== Execução finalizada ===")
 
 
