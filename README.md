@@ -1,127 +1,118 @@
-# 🛡️ Agente de Busca de Emprego para Cibersegurança
+# 🛡️ Agente de Busca de Vagas — TI e Cibersegurança
 
-Busca automaticamente vagas de cibersegurança no Brasil (remoto e presencial)
-agregando LinkedIn, Indeed, Glassdoor e Google Jobs através da **JSearch API**,
-e te avisa por **WhatsApp** quando encontrar vagas novas.
+Agente em Python que monitora vagas de **estágio e nível iniciante em TI e
+cibersegurança** no Brasil e envia alertas automáticos via **Telegram** quando
+aparecem vagas novas.
+
+Projeto pessoal desenvolvido para automatizar minha própria busca de estágio
+durante o curso de Defesa Cibernética (FATEC).
+
+## O que ele faz
+
+- Consulta a **JSearch API** (agrega LinkedIn, Indeed, Glassdoor, Google Jobs e outros)
+- Filtra por **localização** (estado de São Paulo ou remoto)
+- Descarta resultados que **não são vagas reais** (notícias/artigos indexados por engano)
+- Descarta vagas de **nível sênior/pleno/liderança** e de **áreas não relacionadas**
+  (ex.: "Segurança do Trabalho", engenharia civil)
+- **Deduplica** vagas já notificadas (usando o link da vaga como identificador estável)
+- Envia as vagas novas por **Telegram**, com reenvio automático das que falharem
+- Espera a internet ficar disponível e tenta novamente em falhas de rede
+- Roda sozinho todos os dias via agendador de tarefas
+
+## Stack
+
+Python 3 · `requests` · `python-dotenv` · JSearch API (OpenWeb Ninja) ·
+Telegram Bot API · Windows Task Scheduler
 
 ---
 
 ## 1. Instalação
 
 ```bash
-# Extraia os arquivos em uma pasta, depois:
-cd job-agent
+git clone https://github.com/gabrielw1000001-droid/agente-vagas-ciberseguranca.git
+cd agente-vagas-ciberseguranca
 pip install -r requirements.txt
 ```
 
 Requer Python 3.8+.
 
----
-
 ## 2. Configuração
 
-Copie `.env.example` para `.env`:
+Copie o arquivo de exemplo e preencha com suas credenciais:
 
 ```bash
 cp .env.example .env
 ```
 
-### 2.1 Chave da JSearch API (gratuita, via OpenWeb Ninja — endpoint direto)
+> ⚠️ O arquivo `.env` contém chaves pessoais e **nunca deve ser versionado**.
+> Ele já está no `.gitignore`.
 
-1. Crie uma conta em https://app.openwebninja.com/signup (não precisa de cartão)
-2. Acesse https://www.openwebninja.com/api/jsearch e assine o plano **Free**
-   (200 requisições/mês, suficiente para rodar o agente uma vez por dia)
-3. Copie sua **API Key** no painel (app.openwebninja.com) e cole no `.env`
-   em `OPENWEBNINJA_API_KEY`.
+### 2.1 JSearch API (OpenWeb Ninja)
 
-> 💡 Essa é a mesma API JSearch, só que acessada direto pelo site da OpenWeb
-> Ninja (empresa por trás dela), sem passar pelo marketplace da RapidAPI —
-> evita problemas de assinatura/plano não renovar automaticamente.
+1. Crie uma conta em https://app.openwebninja.com/signup
+2. Assine o plano **Free** da JSearch em https://www.openwebninja.com/api/jsearch
+   (200 requisições/mês)
+3. Copie sua API Key para `OPENWEBNINJA_API_KEY` no `.env`
 
-### 2.2 WhatsApp via CallMeBot (gratuito)
+### 2.2 Telegram
 
-1. Salve o número **+34 644 59 71 67** nos seus contatos do WhatsApp.
-2. Envie para esse número a mensagem exata:
-   `I allow callmebot to send me messages`
-3. Você vai receber de volta uma mensagem com sua **API Key**.
-4. No `.env`, preencha:
-   - `WHATSAPP_PHONE`: seu número com código do país, só números
-     (ex: `5511999999999`)
-   - `CALLMEBOT_APIKEY`: a chave recebida
+1. No Telegram, converse com **@BotFather** e envie `/newbot`
+2. Escolha um nome e um username (terminado em `bot`)
+3. Copie o token recebido para `TELEGRAM_BOT_TOKEN`
+4. Envie qualquer mensagem para o **seu bot** (não para o BotFather)
+5. Abra `https://api.telegram.org/bot<SEU_TOKEN>/getUpdates` no navegador
+6. Copie o número de `"chat":{"id": ...}` para `TELEGRAM_CHAT_ID`
 
-> ⚠️ CallMeBot é um serviço gratuito mantido por terceiros, ideal para uso
-> pessoal. Se ele ficar instável, alternativas são Twilio WhatsApp API
-> (paga) ou trocar o alerta para e-mail/Telegram — posso te ajudar a adaptar
-> o código se quiser.
+### 2.3 Outras opções (`.env`)
 
-### 2.3 Ajustar palavras-chave (opcional)
+| Variável | Descrição |
+|---|---|
+| `SEARCH_KEYWORDS` | Termos de busca separados por vírgula |
+| `SEARCH_COUNTRY` | País (código ISO, ex.: `br`) |
+| `DATE_POSTED` | `today`, `3days`, `week` ou `month` |
+| `MAX_JOBS_PER_RUN` | Máximo de notificações por execução |
+| `FILTER_SAO_PAULO` | `true` para só aceitar vagas de SP ou remotas |
 
-No `.env`, edite `SEARCH_KEYWORDS` com os termos que fazem sentido para
-você, por exemplo:
-
-```
-SEARCH_KEYWORDS=cibersegurança,pentester,SOC analyst,red team,blue team,GRC,analista de segurança da informação
-```
-
----
-
-## 3. Testar manualmente
+## 3. Executar
 
 ```bash
 python job_search_agent.py
 ```
 
-Verifique o arquivo `agent.log` gerado na pasta para ver o que aconteceu.
-Na primeira execução, **todas** as vagas encontradas serão consideradas
-"novas" (não há histórico ainda) — isso é esperado.
+O histórico fica em `agent.log`. Na primeira execução todas as vagas
+encontradas contam como "novas".
 
----
+## 4. Automatizar (Windows)
 
-## 4. Automatizar (rodar sozinho periodicamente)
-
-### Linux / macOS (cron)
-
-```bash
-crontab -e
+```powershell
+schtasks /create /tn "AgenteVagas" /tr "'C:\caminho\python.exe' 'C:\caminho\job_search_agent.py'" /sc daily /st 08:00
 ```
 
-Adicione uma linha para rodar a cada 6 horas, por exemplo:
+No Agendador de Tarefas, marque também *"Executar a tarefa o mais cedo possível
+após uma inicialização agendada ter sido perdida"* para rodar mesmo que o PC
+esteja desligado às 08:00.
+
+Em Linux/macOS, use `cron`:
 
 ```
-0 */6 * * * cd /caminho/completo/para/job-agent && /usr/bin/python3 job_search_agent.py >> cron.log 2>&1
+0 8 * * * cd /caminho/do/projeto && python3 job_search_agent.py
 ```
 
-### Windows (Agendador de Tarefas)
+## 5. Como funciona
 
-1. Abra o **Agendador de Tarefas** → **Criar Tarefa Básica**
-2. Gatilho: recorrência a cada 6 horas (ou o intervalo que preferir)
-3. Ação: **Iniciar um programa**
-   - Programa: `python.exe` (ou o caminho completo do seu Python)
-   - Argumentos: `job_search_agent.py`
-   - Iniciar em: caminho completo da pasta `job-agent`
+1. Para cada palavra-chave, consulta a API (com retry em falhas de rede)
+2. Aplica os filtros: vaga real → nível/área adequados → localização
+3. Compara com `seen_jobs.json` para identificar só as vagas novas
+4. Envia as novas por Telegram; só marca como "vista" a que foi entregue com sucesso
+5. Registra tudo em `agent.log`
 
----
+## 6. Limitações
 
-## 5. Como funciona por baixo dos panos
+- O plano gratuito da API tem 200 requisições/mês (3 palavras-chave × 1 execução/dia cabe com folga)
+- Os filtros por título são heurísticos (listas de termos) e podem precisar de ajuste
+- Dados de localização vêm das fontes originais e às vezes estão incorretos
 
-1. Para cada palavra-chave em `SEARCH_KEYWORDS`, consulta a JSearch API
-   filtrando por país (`SEARCH_COUNTRY=br`) e data de postagem
-   (`DATE_POSTED`).
-2. Deduplica os resultados por `job_id`.
-3. Compara com `seen_jobs.json` (histórico local) para achar só vagas novas.
-4. Envia uma mensagem de WhatsApp por vaga nova (limitado por
-   `MAX_JOBS_PER_RUN` para não te encher de mensagens de uma vez).
-5. Atualiza `seen_jobs.json` para não notificar a mesma vaga de novo.
+## Segurança
 
----
-
-## 6. Limitações e próximos passos possíveis
-
-- **Plano gratuito da OpenWeb Ninja** tem limite de 200 requisições por mês — se
-  esgotar, o agente vai logar erro até o mês virar (ou você pode fazer
-  upgrade do plano).
-- **CallMeBot** é pessoal e informal, não é o WhatsApp Business oficial da
-  Meta — não use para volume alto de mensagens.
-- Posso evoluir isso para: filtrar por nível de senioridade, ranquear vagas
-  por match com seu currículo (usando IA), gerar um dashboard web, ou trocar
-  o canal de alerta para e-mail/Telegram/Discord. É só pedir.
+- Credenciais ficam apenas no `.env` (fora do Git)
+- Arquivos de estado local (`seen_jobs.json`, `agent.log`, `last_run.json`) também são ignorados

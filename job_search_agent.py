@@ -162,6 +162,25 @@ _NEWS_LIKE_PATTERNS = [
     "estudo mostra", "segundo dados", "relatório", "índice",
 ]
 
+# Níveis de senioridade acima do que faz sentido para quem está começando
+# (estágio/estudante) — evita vagas Sênior/Pleno/Especialista/liderança
+_SENIORITY_BLOCKLIST = [
+    "sênior", "senior", " sr.", " sr ", "pleno", "especialista",
+    "coordenador", "coordenação", "gerente", "gerência", "gestor",
+    "supervisor", "diretor", "head of", "líder técnico", "tech lead",
+    "principal", "staff engineer",
+]
+
+# Áreas que não têm relação com TI/cibersegurança, mas aparecem por engano
+# porque compartilham palavras com as buscas (ex: "segurança" também é usado
+# em Segurança do Trabalho; "infraestrutura" também é usado em obras/construção)
+_IRRELEVANT_FIELD_BLOCKLIST = [
+    "segurança do trabalho", "segurança patrimonial", "vigilância",
+    "engenheiro civil", "engenharia civil", "arquiteto", "arquitetura",
+    "obra", "construção civil", "técnico de enfermagem", "segurança de trânsito",
+    "recursos humanos", "segurança alimentar", "engenharia de produção",
+]
+
 
 def is_probably_real_job(job: dict) -> bool:
     """Filtro de qualidade: descarta resultados que a API às vezes retorna por
@@ -185,6 +204,22 @@ def is_probably_real_job(job: dict) -> bool:
     return True
 
 
+def is_appropriate_level_and_field(job: dict) -> bool:
+    """Filtra vagas de nível sênior/liderança (fora do perfil de quem está
+    começando) e vagas de áreas que não são TI/cibersegurança, mas aparecem
+    por coincidência de palavras nas buscas (ex: Segurança do Trabalho,
+    Engenharia Civil)."""
+    title = (job.get("job_title") or "").lower()
+
+    if any(term in title for term in _SENIORITY_BLOCKLIST):
+        return False
+
+    if any(term in title for term in _IRRELEVANT_FIELD_BLOCKLIST):
+        return False
+
+    return True
+
+
 def collect_all_jobs() -> list:
     """Roda a busca para todas as palavras-chave configuradas e deduplica por chave estável."""
     all_jobs = {}
@@ -196,6 +231,11 @@ def collect_all_jobs() -> list:
         removed = len(jobs_raw) - len(jobs)
         if removed:
             log.info(f"  -> {removed} descartado(s) por não parecerem vaga real (notícia/artigo)")
+        before_level_filter = len(jobs)
+        jobs = [j for j in jobs if is_appropriate_level_and_field(j)]
+        removed_level = before_level_filter - len(jobs)
+        if removed_level:
+            log.info(f"  -> {removed_level} descartado(s) por nível sênior/pleno ou área não relacionada")
         for job in jobs:
             key = stable_job_key(job)
             if key:
